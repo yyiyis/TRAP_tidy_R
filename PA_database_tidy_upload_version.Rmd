@@ -1,0 +1,388 @@
+---
+title: "tidy"
+author: "YYS"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+    toc: yes
+---
+
+
+# load packages and data
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(DataExplorer)
+```
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+data0 <- read_excel("D:/my data/Project1/TRAP_data.xlsx")
+data0 <- data0 %>% mutate(id = c(1:nrow(data0))) %>% select(id, everything())
+View(data0)
+```
+
+# base data
+
+```{r eval=FALSE, include=FALSE}
+data <- data0 %>% select(id, v2,v4a, v6:v21) %>%  
+  rename(gender = v7, birth_year = v8a, birth_month = v8b, height = v9, weight = v10,
+         edu = v11, work_state = v12, work_days = v13a, rest_days = v13b, 
+         career = v14a, career2 = v14b,
+         smoking_number = v15, conditioner_time = v16, kaichuang_time = v17, air_cleaner_time = v18, 
+         residence_type1 = v19a, residence_floor = v19c, 
+         commuting_time = v20, outdoor_time = v21) %>%  
+  mutate(all_day = work_days + rest_days) %>% 
+  rename(career1 = career)
+# str(base_data)
+view(data)
+```
+
+# tidy
+
+## give value
+
+### Personal information 
+
+age, gender, edu
+
+```{r eval=FALSE, include=FALSE}
+data <- data %>% 
+  mutate(gender = ifelse(gender == 1, "male", "female")) %>%    ## gender
+  mutate(birth_time = make_datetime(birth_year, birth_month),      ## age
+         age = year(as.period(interval(start = birth_time, end = v4a))))
+  
+data$edu <- factor(data$edu,
+                   levels = c("1","2","3","4"),
+                   labels = c("Primary or below","Junior","Senior","Bachelor or above"))
+```
+
+### career
+
+```{r eval=FALSE, include=FALSE}
+data$work_state <- factor(data$work_state, 
+                          levels = c("1","2","3"),
+                          labels = c("On_the_job","Unemployed","Retired"))
+
+# career 
+
+#career1 >11 into NA
+summary(data$career1 %>% as.factor())
+summary(data$career2 %>% as.factor())
+data$career1[data$career1 > 11] <- NA
+
+#career2 
+summary(data$career2 %>% as.factor())
+
+data$career2[data$career2 == "." ] <- NA
+data$career2[data$career2 == 1 ] <- NA
+data$career2[data$career2 == 2241] <- NA
+data$career2[data$career2 == 4 ] <- NA
+
+data$career2[data$career2 == "个体" ] <- "个体经营"
+data$career2[data$career2 == "室内个体经营者" ] <- "个体经营"
+data$career2[data$career2 == "离退人员" ] <- "离退休"
+data$career2[data$career2 == "退休" ] <- "离退休"
+data$career2[data$career2 == "退休人员" ] <- "离退休"
+
+data$career2[data$career2 == "主妇" ] <- "家庭主妇"
+data$career2[data$career2 == "农" ] <- "农民"
+data$career2[data$career2 == "务农" ] <- "农民"
+data$career2[data$career2 == "淘宝商" ] <- "网店店主"
+data$career2[data$career2 == "交警/交通协管" ] <- NA
+summary(data$career2 %>% as.factor())
+
+#combin career2 & career1
+##先给career2赋值，参与运算（na.rm = T， NA的传播）, 最后再倒过来
+##career2里面的每一类都要先filter出来，看看对应的career1是啥
+##同时看能够合理合并到career1里面
+
+data$career2 <- factor(data$career2, 
+                              levels=c("个体经营","家庭主妇","金融工作人员","离退休","美容行业",
+                                       "农民","三轮车拉货","生产车间","室内生产","收藏",
+                                       "司机","网店店主","无业","销售","医生","营业员"), 
+                              labels=c("16","17","18","19","20","21","22","23","24","25","26","27","28","29","30","31"))
+
+summary(data$career2 %>% as.factor())
+
+##这个里面"离退休"的在work_state里面就可以对应上（也可以据此做逻辑核查）
+
+#test
+#a <- tibble(career1 = c("1","2",NA,"4"),
+#            career2 = c(NA,"8","3",NA))
+#a$career1 <- a$career1 %>% as.numeric()
+#a$career2 <- a$career2 %>% as.numeric()
+#a %>% select(career1, career2) %>% 
+#  mutate_if(
+#    function(x) any(is.na(x)),
+#    funs(replace_na),
+#    replace = 0
+#  ) %>% 
+#  mutate(career = career1 + career2)
+
+data$career1 <- data$career1 %>% as.numeric()
+data$career2 <- data$career2 %>% as.numeric()
+data_career <- data %>% select(id, career1, career2) %>% 
+   mutate_if(
+     function(x) any(is.na(x)),
+     funs(replace_na),
+     replace = 0
+   ) %>% 
+   mutate(career2 = career2 + 15) #%>%
+data_career$career2[data_career$career2 == "15" ] <- "0"
+
+data_career$career1 <- data_career$career1 %>% as.numeric()
+data_career$career2 <- data_career$career2 %>% as.numeric()
+data_career <- data_career %>% 
+  mutate(career = career1 + career2) %>% 
+  select(id, career)
+
+data <- list(data,data_career)%>%
+  reduce(inner_join,by="id")
+
+data$career[data$career == "0" ] <- NA
+data$career %>% as.factor() %>% summary()
+#发现有36的超限了(20个)
+
+##检查>=16的那些，是否都是career1 = 0,可以通过核对16-31的个数
+##以及<16那些，是否career1都不等于0
+#核对个数，即比较
+#summary(data$career1 %>% as.factor())
+#summary(data$career2 %>% as.factor())
+#data$career %>% as.factor() %>% summary()
+data$career[data$career == "36" ] <- "26"
+data$career %>% as.numeric() %>% as.factor() %>% summary()
+
+#career 整完了
+summary(data$career %>% as.factor())
+
+data$career <- factor(data$career, 
+                      levels = c("1","2","3","4","5","6","7","8","9","10",
+                                 "11","16","17","18","19","20",
+                                 "21","22","23","24","25","26",
+                                 "27","28","29","30","31"),
+                      labels = c("学生","室内工作人员","室外个体商贩","快递","保安",
+                                 "交警","加油站停车场","户外工人","厨师","司机","外卖员",
+                                 "个体经营","家庭主妇","金融工作人员","离退休","美容行业",
+                                 "农民","三轮车拉货","生产车间","室内生产","收藏",
+                                 "司机","网店店主","无业","销售","医生","营业员"))
+
+data$career <- factor(data$career, 
+                      levels = c("学生","室内工作人员","室外个体商贩","快递","保安",
+                                 "交警","加油站停车场","户外工人","厨师","司机","外卖员",
+                                 "个体经营","家庭主妇","金融工作人员","离退休","美容行业",
+                                 "农民","三轮车拉货", "生产车间","室内生产","收藏", 
+                                 "司机", "网店店主","无业","销售","医生","营业员"),
+                      labels = c("student","Indoor staff","Outdoor individual vendors",
+                                 "deliveryman","Guard","traffic police",
+                                 "Gas station parking lot staff","outdoor staff",
+                                 "chef","driver","fast food delivery",
+                                 "individual proprietorship","housewife","Financial staff",
+                                 "retirement","beauty staff","farmer","tricycle delivery",
+                                 "manufacturing shop","Indoor production",
+                                 "collect","driver","shopkeeper of online store",
+                                 "unemployed","market","doctor","shop assistant"))
+
+# 25 careers
+
+summary(data$career)
+```
+
+### Personal habits
+
+
+```{r eval=FALSE, include=FALSE}
+summary(data$smoking_number %>% as.factor())
+data$smoking_number[data$smoking_number > 5] <- NA
+
+summary(data$conditioner_time %>% as.factor())
+data$conditioner_time[data$conditioner_time > 4] <- NA
+
+summary(data$kaichuang_time %>% as.factor())
+data$kaichuang_time[data$kaichuang_time > 5] <- NA
+
+summary(data$air_cleaner_time %>% as.factor())
+data$air_cleaner_time[data$air_cleaner_time > 4] <- NA
+
+
+data$smoking_number <- factor(data$smoking_number, 
+                              levels=c("1","2","3","4","5"), 
+                              labels=c("Non_smoking","1-4","5-9","10-19","≥ 20"))
+data$conditioner_time <- factor(data$conditioner_time, 
+                                levels=c("1","2","3","4"), 
+                                labels=c("< 0.5 h","0.5 ~ h","3 ~ h","6 ~ h"))
+data$kaichuang_time <- factor(data$kaichuang_time, 
+                              levels=c("1","2","3","4","5"), 
+                              labels=c("< 0.5 h","0.5 ~ h","1 ~ h","2 ~ h","3 ~ h"))
+data$air_cleaner_time <- factor(data$air_cleaner_time, 
+                                levels=c("1","2","3","4"), 
+                                labels=c("< 0.5 h","0.5 ~ h","3 ~ h","6 ~ h"))
+```
+
+### Living situation
+
+```{r eval=FALSE, include=FALSE}
+data$residence_type1 <- data$residence_type1 %>% as.numeric()
+summary(data$residence_type1 %>% as.factor())
+data$residence_type1[data$residence_type1 > 2] <- NA
+data$residence_type1 <- ifelse(data$residence_type1 == "1","bungalow","building") %>%
+  as.factor()
+
+
+
+# 楼层这个转为cat吧
+data$residence_floor <- data$residence_floor %>% as.numeric()
+summary(data$residence_floor %>% as.factor())
+data$residence_floor[data$residence_floor > 54] <- NA
+
+data$residence_floor2 <- cut(as.numeric(data$residence_floor), 
+                            breaks = c(-Inf, 5, 10, 20, Inf), 
+                            labels = c("< 5", "5 ~ ", "10 ~ ", "20 ~"), 
+                            right = FALSE) %>% as.factor()
+summary(data$residence_floor2 %>% as.factor())
+```
+
+
+```{r eval=FALSE, include=FALSE}
+view(data)
+```
+
+
+### select
+
+```{r eval=FALSE, include=FALSE}
+data <- data %>% 
+  select(id, gender, age, height:rest_days, all_day, career, 
+         smoking_number:air_cleaner_time,
+         residence_type1, residence_floor, residence_floor2,
+         commuting_time, commuting_time2, outdoor_time)
+view(data)
+```
+
+## R.data
+
+```{r eval=FALSE, include=FALSE}
+# save(data, file = "give_value_data.RData")
+```
+
+
+## tidy outlier
+
+
+```{r}
+load("give_value_data.RData")
+view(data)
+str(data)
+tail(data, 5) %>% knitr::kable()
+```
+
+
+```{r, dpi = 300}
+plot_missing(data)
+plot_histogram(data)
+plot_bar(data)
+```
+
+
+## tidy process
+
+attention:need to be convert into number at first
+
+age
+```{r}
+data$age[data$age < 18] <- NA
+data$age[data$age > 85] <- NA
+
+data$age %>% as.factor() %>% summary()
+
+ggplot(data, aes(age)) + 
+  geom_histogram(binwidth = 5, center = 2.5, closed = c("left"))
+
+```
+
+
+
+height and weight 
+```{r}
+# height
+ggplot(data, aes(height)) + geom_histogram(bins = 1000)
+
+# Turkey method Outlier
+QL <- quantile(data$height, probs = 0.25, na.rm = T)
+QU <- quantile(data$height, probs = 0.75, na.rm = T)
+IQR <- QU - QL
+
+data$height[data$height > data$height[which(data$height > QU + 1.5*IQR)] %>% min()] <- NA
+data$height[data$height < data$height[which(data$height < QL - 1.5*IQR)] %>% max()] <- NA
+
+ggplot(data, aes(height)) + geom_histogram(bins = 100)
+
+
+# weight
+
+QL <- quantile(data$weight, probs = 0.25, na.rm = T)
+QU <- quantile(data$weight, probs = 0.75, na.rm = T)
+IQR <- QU - QL
+
+data$weight[data$weight > data$weight[which(data$weight > QU + 1.5*IQR)] %>% min()] <- NA
+data$weight[data$weight < data$weight[which(data$weight < QL - 1.5*IQR)] %>% max()] <- NA
+
+ggplot(data, aes(weight)) + geom_histogram(bins = 100)
+```
+
+work days
+
+```{r}
+data <- data %>% 
+  mutate(work_days = ifelse(all_day > 7, NA, work_days),
+         rest_days = ifelse(all_day > 7, NA, rest_days)) %>% 
+  select(-all_day)
+view(data)
+```
+
+commuting_time
+
+```{r}
+ggplot(data, aes(commuting_time)) + geom_histogram(bins = 100)
+ggplot(data, aes(commuting_time)) + geom_boxplot()
+# view(data)
+data$commuting_time[data$commuting_time > 6] <- NA
+
+ggplot(data, aes(commuting_time)) + geom_histogram(bins = 100)
+
+data$commuting_time2 <- cut(as.numeric(data$commuting_time), 
+                            breaks = c(-Inf, 0.5, 1, 3, Inf), 
+                            labels = c("< 0.5h","0.5 ~ h","1 ~ h","3 ~ h"), 
+                            right = FALSE) %>% as.factor()
+summary(data$commuting_time2)
+```
+
+outdoor_time
+
+```{r}
+ggplot(data, aes(outdoor_time)) + geom_histogram(bins = 100)
+
+data$outdoor_time[data$outdoor_time > 24] <- NA
+
+QL <- quantile(data$outdoor_time, probs = 0.25, na.rm = T)
+QU <- quantile(data$outdoor_time, probs = 0.75, na.rm = T)
+IQR <- QU - QL
+
+data$outdoor_time[data$outdoor_time > data$outdoor_time[which(data$outdoor_time > QU + 1.5*IQR)] %>% min()] <- NA
+data$outdoor_time[data$outdoor_time < data$outdoor_time[which(data$outdoor_time < QL - 1.5*IQR)] %>% max()] <- NA
+ggplot(data, aes(outdoor_time)) + geom_histogram(bins = 100)
+```
+
+
+# data ok
+
+```{r}
+save(data, file = "tidy_data.RData")
+load("tidy_data.RData")
+view(data)
+```
+
